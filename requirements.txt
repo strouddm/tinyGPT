@@ -1,0 +1,3 @@
+torch>=2.2.1          # 2.3+ when available for your OS/arch
+numpy>=1.26.4,<2.0    # stay below 2 until PyTorch & friends rebuild
+tiktoken>=0.5.1       # OpenAI's tokenizer
