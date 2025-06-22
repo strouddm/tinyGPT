@@ -8,16 +8,15 @@ import tiktoken
 from model import TinyGPT
 
 BLOCK_SIZE = 256
-BATCH_SIZE = 32  # Increased further for better performance
+BATCH_SIZE = 64  # Increased from 32 for 32GB RAM
 VAL_SPLIT  = 0.02
 EPOCHS     = 5
-LR         = 2e-3
+LR         = 3e-3  # Slightly increased for larger batch size
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--corpus', default='corpus/corpus_clean.txt')
 args = parser.parse_args()
 
-# --- Dataset class (moved outside main for multiprocessing compatibility) ---
 class TokenDataset(Dataset):
     def __init__(self, tokens, split='train'):
         split_idx = int(len(tokens) * (1 - VAL_SPLIT))
@@ -30,8 +29,7 @@ class TokenDataset(Dataset):
         return x, y
 
 def main():
-    print("🚀 Starting TinyGPT Training Setup (Performance Optimized)...")
-    print("⚠️  Using single-threaded mode for maximum compatibility")
+    print("🚀 Starting TinyGPT Training Setup...")
 
     # --- Load & tokenize corpus --------------------------------------------------
     print("📚 Loading and tokenizing corpus...")
@@ -55,12 +53,12 @@ def main():
     print("📊 Creating datasets...")
     train_ds = TokenDataset(tokens, 'train')
     val_ds   = TokenDataset(tokens, 'val')
-    # Single-threaded for maximum compatibility and performance
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, num_workers=0)
+    # Multi-threaded for 8-core VM
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=False)
+    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, num_workers=4, pin_memory=False)
     print(f"   Train batches: {len(train_loader)}")
     print(f"   Val batches: {len(val_loader)}")
-    print(f"   DataLoader workers: 0 (single-threaded for maximum speed)")
+    print(f"   DataLoader workers: 4 (optimized for 8-core VM)")
 
     # --- Model & optim -----------------------------------------------------------
     print("🧠 Initializing model...")
@@ -75,8 +73,12 @@ def main():
 
     # Memory usage estimation
     estimated_memory = sum(p.numel() for p in model.parameters()) * 4 / 1024 / 1024  # MB
+    batch_memory = BATCH_SIZE * BLOCK_SIZE * 4 / 1024 / 1024  # MB for batch data
+    total_estimated = estimated_memory + batch_memory
     print(f"   Estimated model memory: {estimated_memory:.1f} MB")
-    print(f"   Available RAM: 16GB - plenty of headroom!")
+    print(f"   Estimated batch memory: {batch_memory:.1f} MB")
+    print(f"   Total estimated memory: {total_estimated:.1f} MB")
+    print(f"   Available RAM: 32GB - plenty of headroom!")
 
     def run_epoch(loader, train=True):
         model.train(train)
@@ -126,7 +128,7 @@ def main():
         return avg_loss
 
     print("🎯 Starting training loop...")
-    print("⏱️  Expected time: ~15-30 minutes per epoch")
+    print("⏱️  Expected time: ~10-20 minutes per epoch (optimized for 8-core VM)")
     print("🚨 If training takes >1 hour per epoch, there's a performance issue!")
     
     for epoch in range(EPOCHS):
@@ -154,9 +156,10 @@ def main():
     print("📁 Checkpoints saved:")
     for i in range(1, EPOCHS + 1):
         print(f"   - checkpoint_epoch{i}.pt")
-    print(f"\n💡 Performance optimizations made:")
-    print(f"   - Batch size: 32 (4x larger than original)")
-    print(f"   - Single-threaded mode (no multiprocessing overhead)")
+    print(f"\n💡 Performance optimizations for 8-core, 32GB RAM VM:")
+    print(f"   - Batch size: 64 (2x larger than before)")
+    print(f"   - Multi-threaded mode (4 workers for 8-core CPU)")
+    print(f"   - Learning rate: 3e-3 (optimized for larger batch size)")
     print(f"   - Emergency stop if training takes >1 hour per epoch")
     print(f"   - Detailed timing information")
 
