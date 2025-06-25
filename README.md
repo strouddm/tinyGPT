@@ -22,10 +22,46 @@ python train.py
 3. Generate text from the trained checkpoint:
 
 ```bash
-python generate.py --prompt "Who is God?"
+python generate.py --prompt "Who is the son of God?"
 ```
 
-The first run on an 8‑core laptop should take ~4–6 h for 5 epochs on a 15 MB corpus.
+Example Results:
+'''bash
+Starting TinyGPT Text Generation...
+📖 Prompt: 'Who is the son of God'
+🎯 Target tokens: 100
+🌡️  Temperature: 0.7
+🔧 Loading model and tokenizer...
+   Vocabulary size: 50,257
+📂 Loading checkpoint: checkpoint_epoch5.pt
+✅ Model loaded and ready for generation
+
+============================================================
+🎭 Starting generation...
+   Initial prompt tokens: 6
+   Generated 10/100 tokens...
+   Generated 20/100 tokens...
+   Generated 30/100 tokens...
+   Generated 40/100 tokens...
+   Generated 50/100 tokens...
+   Generated 60/100 tokens...
+   Generated 70/100 tokens...
+   Generated 80/100 tokens...
+   Generated 90/100 tokens...
+✅ Generation complete! Total tokens: 106
+============================================================
+🎉 GENERATED TEXT:
+============================================================
+Who is the son of God, and whom God has given. For
+he says, "Hine own son shall send forth Thy law;" and
+in which seditions, "Preareth shall offer up," and what
+dantec to the judgment of choice, and to "His
+commandment." He adds, "The Lord hath rent up the people of God,"
+otherwise than "His grace," and "His coming up the Lord Jesus,"
+He adds, "And it shall not be greater than
+============================================================
+'''
+
 
 ## Directory layout
 ```
