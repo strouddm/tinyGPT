@@ -1,4 +1,4 @@
-"""CPU‑only training script for PocketGPT."""
+"""CPU‑only training script for tinyGPT."""
 import os, pickle, math, argparse, time, pathlib
 
 import torch, numpy as np
