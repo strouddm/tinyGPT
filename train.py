@@ -1,4 +1,4 @@
-"""CPU‑only training script for PocketGPT."""
+"""CPU‑only training script for TinyGPT."""
 import os, pickle, math, argparse, time, pathlib
 
 import torch, numpy as np
@@ -8,10 +8,11 @@ import tiktoken
 from model import TinyGPT
 
 BLOCK_SIZE = 256
-BATCH_SIZE = 64  # Increased from 32 for 32GB RAM
-VAL_SPLIT  = 0.02
+BATCH_SIZE = 128  # Much larger batch size for 32GB RAM
+VAL_SPLIT  = 0.01  # Reduced validation split
 EPOCHS     = 5
-LR         = 3e-3  # Slightly increased for larger batch size
+LR         = 5e-3  # Higher learning rate for larger batch size
+GRAD_ACCUM = 2  # Gradient accumulation steps
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--corpus', default='corpus/corpus_clean.txt')
@@ -53,23 +54,25 @@ def main():
     print("📊 Creating datasets...")
     train_ds = TokenDataset(tokens, 'train')
     val_ds   = TokenDataset(tokens, 'val')
-    # Multi-threaded for 8-core VM
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=False)
-    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, num_workers=4, pin_memory=False)
+    # Aggressive multi-threading for 8-core VM
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=6, pin_memory=True, persistent_workers=True)
+    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE*2, num_workers=6, pin_memory=True, persistent_workers=True)
     print(f"   Train batches: {len(train_loader)}")
     print(f"   Val batches: {len(val_loader)}")
-    print(f"   DataLoader workers: 4 (optimized for 8-core VM)")
+    print(f"   DataLoader workers: 6 (aggressive for 8-core VM)")
+    print(f"   Pin memory: True (faster data transfer)")
 
     # --- Model & optim -----------------------------------------------------------
     print("🧠 Initializing model...")
     model = TinyGPT(tokenizer.n_vocab, BLOCK_SIZE)
     device = torch.device('cpu')
     model.to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=LR)
+    opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.01)
     print(f"   Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"   Vocabulary size: {tokenizer.n_vocab:,}")
     print(f"   Block size: {BLOCK_SIZE}")
     print(f"   Learning rate: {LR}")
+    print(f"   Effective batch size: {BATCH_SIZE * GRAD_ACCUM}")
 
     # Memory usage estimation
     estimated_memory = sum(p.numel() for p in model.parameters()) * 4 / 1024 / 1024  # MB
@@ -78,7 +81,7 @@ def main():
     print(f"   Estimated model memory: {estimated_memory:.1f} MB")
     print(f"   Estimated batch memory: {batch_memory:.1f} MB")
     print(f"   Total estimated memory: {total_estimated:.1f} MB")
-    print(f"   Available RAM: 32GB - plenty of headroom!")
+    print(f"   Available RAM: 32GB - using ~{total_estimated/32*100:.1f}%")
 
     def run_epoch(loader, train=True):
         model.train(train)
@@ -88,22 +91,30 @@ def main():
         
         # Time tracking
         epoch_start = time.time()
-        last_update = epoch_start
         
         for batch_idx, (x, y) in enumerate(loader):
             batch_start = time.time()
             
             x, y = x.to(device), y.to(device)
             logits, loss = model(x, y)
+            
             if train:
-                opt.zero_grad()
+                # Gradient accumulation
+                loss = loss / GRAD_ACCUM
                 loss.backward()
-                opt.step()
-            total_loss += loss.item()
+                
+                if (batch_idx + 1) % GRAD_ACCUM == 0:
+                    opt.step()
+                    opt.zero_grad()
+            else:
+                # Validation - no gradient computation needed
+                pass
+                
+            total_loss += loss.item() * (GRAD_ACCUM if train else 1)
             steps += 1
             
-            # Progress update every 10 batches with timing info
-            if batch_idx % 10 == 0 and batch_idx > 0:
+            # Progress update every 5 batches (more frequent for larger batches)
+            if batch_idx % 5 == 0 and batch_idx > 0:
                 avg_loss = total_loss / steps
                 progress = (batch_idx / len(loader)) * 100
                 elapsed = time.time() - epoch_start
@@ -115,9 +126,9 @@ def main():
                       f"ETA: {eta/60:.1f}m")
             
             # Emergency stop if taking too long
-            if batch_idx > 0 and batch_idx % 100 == 0:
+            if batch_idx > 0 and batch_idx % 50 == 0:
                 elapsed = time.time() - epoch_start
-                if elapsed > 3600:  # More than 1 hour
+                if elapsed > 1800:  # More than 30 minutes
                     print(f"⚠️  Emergency stop: Training taking too long ({elapsed/60:.1f} minutes for {batch_idx} batches)")
                     print(f"   This suggests a performance issue. Consider reducing model size or batch size.")
                     return total_loss / steps
@@ -128,8 +139,8 @@ def main():
         return avg_loss
 
     print("🎯 Starting training loop...")
-    print("⏱️  Expected time: ~10-20 minutes per epoch (optimized for 8-core VM)")
-    print("🚨 If training takes >1 hour per epoch, there's a performance issue!")
+    print("⏱️  Expected time: ~5-10 minutes per epoch (aggressively optimized)")
+    print("🚨 If training takes >30 minutes per epoch, there's a performance issue!")
     
     for epoch in range(EPOCHS):
         print(f"\n📈 Epoch {epoch+1}/{EPOCHS}")
@@ -137,14 +148,22 @@ def main():
         
         t0 = time.time()
         tr_loss = run_epoch(train_loader, True)
-        val_loss = run_epoch(val_loader, False)
+        
+        # Only validate every 2 epochs to save time
+        if epoch % 2 == 0 or epoch == EPOCHS - 1:
+            val_loss = run_epoch(val_loader, False)
+            val_ppl = math.exp(val_loss)
+        else:
+            val_loss = None
+            val_ppl = None
+            
         tr_ppl = math.exp(tr_loss)
-        val_ppl = math.exp(val_loss)
         dt = time.time() - t0
         
         print(f"\n📊 Epoch {epoch+1} Results:")
         print(f"   Train Loss: {tr_loss:.4f} | Train PPL: {tr_ppl:.2f}")
-        print(f"   Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f}")
+        if val_loss is not None:
+            print(f"   Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f}")
         print(f"   Time: {dt/60:.1f} minutes")
         
         # Save checkpoint
@@ -156,12 +175,14 @@ def main():
     print("📁 Checkpoints saved:")
     for i in range(1, EPOCHS + 1):
         print(f"   - checkpoint_epoch{i}.pt")
-    print(f"\n💡 Performance optimizations for 8-core, 32GB RAM VM:")
-    print(f"   - Batch size: 64 (2x larger than before)")
-    print(f"   - Multi-threaded mode (4 workers for 8-core CPU)")
-    print(f"   - Learning rate: 3e-3 (optimized for larger batch size)")
-    print(f"   - Emergency stop if training takes >1 hour per epoch")
-    print(f"   - Detailed timing information")
+    print(f"\n💡 Aggressive performance optimizations for 8-core, 32GB RAM VM:")
+    print(f"   - Batch size: 128 (4x larger than original)")
+    print(f"   - Effective batch size: 256 (with gradient accumulation)")
+    print(f"   - Multi-threaded mode (6 workers for 8-core CPU)")
+    print(f"   - Pin memory: True (faster data transfer)")
+    print(f"   - Learning rate: 5e-3 (optimized for large batch size)")
+    print(f"   - Reduced validation frequency (every 2 epochs)")
+    print(f"   - Emergency stop if training takes >30 minutes per epoch")
 
 if __name__ == '__main__':
     main()
