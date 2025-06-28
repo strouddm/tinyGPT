@@ -26,7 +26,8 @@ python generate.py --prompt "Who is the son of God?"
 ```
 
 Example Results:
-'''bash
+
+```bash
 Starting TinyGPT Text Generation...
 📖 Prompt: 'Who is the son of God'
 🎯 Target tokens: 100
@@ -60,7 +61,7 @@ commandment." He adds, "The Lord hath rent up the people of God,"
 otherwise than "His grace," and "His coming up the Lord Jesus,"
 He adds, "And it shall not be greater than
 ============================================================
-'''
+```
 
 
 ## Directory layout
